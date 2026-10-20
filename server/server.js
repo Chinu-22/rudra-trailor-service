@@ -20,7 +20,8 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-  app.use(cors({
+// Middleware Setup
+app.use(cors({
   origin: true,
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -28,15 +29,35 @@ const transporter = nodemailer.createTransport({
 }));
 app.use(express.json());
 
-app.get("/api/health", (req, res) => {
+// Database connection helper function for Serverless
+const connectDB = async () => {
+  if (mongoose.connection.readyState >= 1) return;
+  try {
+    if (process.env.MONGODB_URI) {
+      await mongoose.connect(process.env.MONGODB_URI);
+      console.log("MongoDB connected successfully.");
+    } else {
+      console.error("MONGODB_URI is missing in env variables!");
+    }
+  } catch (err) {
+    console.error("MongoDB connection error:", err.message);
+  }
+};
+
+// Health Route
+app.get("/api/health", async (req, res) => {
+  await connectDB();
   res.json({
     success: true,
-    message: "Rudra Trailor Service backend is running!"
+    message: "Rudra Trailor Service backend is running!",
+    dbStatus: mongoose.connection.readyState === 1 ? "Connected" : "Disconnected"
   });
 });
 
+// Enquiries Route
 app.post("/api/enquiries", async (req, res) => {
   try {
+    await connectDB();
     const { name, email, phone, company, service, pickup, destination, message } = req.body;
 
     if (!name || !email || !phone || !service || !pickup || !destination) {
@@ -45,7 +66,8 @@ app.post("/api/enquiries", async (req, res) => {
       });
     }
 
-    const Enquiry = mongoose.model(
+    // Dynamic model handling to avoid OverwriteModelError in Serverless
+    const Enquiry = mongoose.models.Enquiry || mongoose.model(
       "Enquiry",
       new mongoose.Schema(
         {
@@ -67,12 +89,6 @@ app.post("/api/enquiries", async (req, res) => {
       )
     );
 
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(503).json({
-        message: "Database is not connected. Please try again later."
-      });
-    }
-
     // Database me enquiry save ho rahi hai
     const enquiry = await Enquiry.create({
       name,
@@ -85,15 +101,14 @@ app.post("/api/enquiries", async (req, res) => {
       message
     });
 
-    // ---- YAHAN SE GMAIL NOTIFICATION KA CODE SHURU ----
+    // ---- GMAIL NOTIFICATION KA CODE ----
     const mailOptions = {
       from: process.env.EMAIL_USER,
-      to: "chinujangra433@getMaxListeners.com", 
+      to: "chinujangra433@gmail.com", // Note: MaxListeners domain valid nahi tha, isko thik kiya hai
       subject: `New Rudra Trailor Enquiry from ${name}`,
       html: `
         <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
           <h2 style="color: #0056b3; border-bottom: 2px solid #0056b3; padding-bottom: 5px;">Rudra Trailor Service - New Website Enquiry</h2>
-          <p>A new query has been submitted with the following details:</p>
           <table style="width: 100%; border-collapse: collapse;">
             <tr><td style="padding: 5px; font-weight: bold; width: 130px;">Name:</td><td style="padding: 5px;">${name}</td></tr>
             <tr><td style="padding: 5px; font-weight: bold;">Email:</td><td style="padding: 5px;">${email}</td></tr>
@@ -104,21 +119,14 @@ app.post("/api/enquiries", async (req, res) => {
             <tr><td style="padding: 5px; font-weight: bold;">Destination:</td><td style="padding: 5px;">${destination}</td></tr>
             <tr><td style="padding: 5px; font-weight: bold; vertical-align: top;">Message:</td><td style="padding: 5px;">${message || 'No message provided.'}</td></tr>
           </table>
-          <hr style="border: 0; border-top: 1px solid #ccc; margin-top: 20px;" />
-          <p style="font-size: 12px; color: #777;">This is an automated notification from your website backend.</p>
         </div>
       `
     };
 
-    // Email send karne ka process (background me chlega, user ka response block nahi hoga)
     transporter.sendMail(mailOptions, (error, info) => {
-      if (error) {
-        console.error("Email send nahi ho paya ❌:", error.message);
-      } else {
-        console.log("Email successfully bhej diya gaya hai! 📩", info.response);
-      }
+      if (error) console.error("Email send nahi ho paya ❌:", error.message);
+      else console.log("Email successfully bhej diya gaya hai! 📩", info.response);
     });
-    // ---- GMAIL NOTIFICATION KA CODE YAHAN KHATAM ----
 
     res.status(201).json({
       success: true,
@@ -131,24 +139,11 @@ app.post("/api/enquiries", async (req, res) => {
   }
 });
 
+// Local development ke liye listen block
 const PORT = process.env.PORT || 5000;
-
-async function startServer() {
-  try {
-    if (process.env.MONGODB_URI) {
-      await mongoose.connect(process.env.MONGODB_URI);
-      console.log("MongoDB connected successfully.");
-    } else {
-      console.log("MONGODB_URI is missing in the .env file.");
-    }
-
-    app.listen(PORT, () => {
-      console.log(`Rudra backend running at http://localhost:${PORT}`);
-    });
-  } catch (error) {
-    console.error("Startup error:", error.message);
-    process.exit(1);
-  }
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 }
 
-startServer();
+// Vercel serverless architecture ke liye application export karna zaroori hai
+export default app;
