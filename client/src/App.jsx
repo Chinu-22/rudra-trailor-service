@@ -105,7 +105,7 @@ export default function App() {
     setStatus("");
 
     try {
-      const response = await fetch("http://localhost:5000/api/enquiries", {
+      const response = await fetch("https://rudra-trailor-service-fjlg.vercel.app/", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
